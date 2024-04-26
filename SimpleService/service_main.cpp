@@ -5,57 +5,208 @@
 #include <sddl.h>
 #include <ntstatus.h>
 #include <fstream>
+#include <format>
+#include <string>
+#include <thread>
+#include <iostream>
 
 
+#define BUFSIZE 512
+using namespace std;
+
+std::wofstream errorLog;
 WCHAR serviceName[] = L"ServiceSample";
 
 SERVICE_STATUS serviceStatus;
 SERVICE_STATUS_HANDLE serviceStatusHandle;
 
-void StartUiProcessInSession(DWORD wtsSession)
+template<typename T>
+void WriteLog(const T& data, std::wstring prefix = L"")
 {
-	HANDLE userToken;
-	if (WTSQueryUserToken(wtsSession, &userToken))
+	if (!errorLog.is_open())
+		errorLog.open("C:\\simpleservicelog.txt", std::ios::app);
+	errorLog << prefix << data << std::endl;
+}
+
+bool Read(HANDLE handle, uint8_t* data, uint64_t length, DWORD& bytesRead)
+{
+	bytesRead = 0;
+	BOOL fSuccess = ReadFile(
+		handle,
+		data,
+		length,
+		&bytesRead,
+		NULL);
+	if (!fSuccess || bytesRead == 0)
 	{
-		WCHAR commandLine[] = L"\"BVT_GUI.exe\" user";
-		WCHAR localSystemSddl[] = L"O:SYG:SYD:";
-		PROCESS_INFORMATION pi{};
-		STARTUPINFO si{};
+		return false;
+	}
+	return true;
+}
 
-		SECURITY_ATTRIBUTES processSecurityAttributes{};
-		processSecurityAttributes.nLength = sizeof(SECURITY_ATTRIBUTES);
-		processSecurityAttributes.bInheritHandle = TRUE;
+bool Write(HANDLE handle, uint8_t* data, uint64_t length)
+{
+	DWORD cbWritten = 0;
+	BOOL fSuccess = WriteFile(
+		handle,
+		data,
+		length,
+		&cbWritten,
+		NULL);
+	if (!fSuccess || length != cbWritten)
+	{
+		return false;
+	}
+	return true;
+}
 
-		SECURITY_ATTRIBUTES threadSecurityAttributes{};
-		threadSecurityAttributes.nLength = sizeof(SECURITY_ATTRIBUTES);
-		threadSecurityAttributes.bInheritHandle = TRUE;
-
-		PSECURITY_DESCRIPTOR psd = nullptr;
-
-		if (ConvertStringSecurityDescriptorToSecurityDescriptorW(localSystemSddl, SDDL_REVISION_1, &psd, nullptr))
+std::wstring GetUserSid(HANDLE userToken)
+{
+	std::wstring userSid;
+	DWORD err = 0;
+	LPVOID pvInfo = NULL;
+	DWORD cbSize = 0;
+	if (!GetTokenInformation(userToken, TokenUser, NULL, 0, &cbSize))
+	{
+		err = GetLastError();
+		if (ERROR_INSUFFICIENT_BUFFER == err)
 		{
-			processSecurityAttributes.lpSecurityDescriptor = psd;
-			threadSecurityAttributes.lpSecurityDescriptor = psd;
-
-			if (CreateProcessAsUserW(
-				userToken,
-				NULL,
-				commandLine,
-				&processSecurityAttributes,
-				&threadSecurityAttributes,
-				FALSE,
-				0,
-				NULL,
-				NULL,
-				&si,
-				&pi))
+			err = 0;
+			pvInfo = LocalAlloc(LPTR, cbSize);
+			if (!pvInfo)
 			{
-				CloseHandle(pi.hThread);
-				CloseHandle(pi.hProcess);
+				err = ERROR_OUTOFMEMORY;
 			}
-			LocalFree(psd);
+			else if (!GetTokenInformation(userToken, TokenUser, pvInfo, cbSize, &cbSize))
+			{
+				err = GetLastError();
+			}
+			else
+			{
+				err = 0;
+				const TOKEN_USER* pUser = (const TOKEN_USER*)pvInfo;
+				LPWSTR userSidBuf;
+				ConvertSidToStringSidW(pUser->User.Sid, &userSidBuf);
+				userSid.assign(userSidBuf);
+				LocalFree(userSidBuf);
+			}
 		}
 	}
+	return userSid;
+}
+
+
+SECURITY_ATTRIBUTES GetSecurityAttributes(const std::wstring& sddl)
+{
+	SECURITY_ATTRIBUTES securityAttributes{};
+	securityAttributes.nLength = sizeof(SECURITY_ATTRIBUTES);
+	securityAttributes.bInheritHandle = TRUE;
+
+	PSECURITY_DESCRIPTOR psd = nullptr;
+
+	if (ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.c_str(), SDDL_REVISION_1, &psd, nullptr)) {
+		securityAttributes.lpSecurityDescriptor = psd;
+	}
+	return securityAttributes;
+}
+
+void StartUiProcessInSession(DWORD wtsSession)
+{
+	std::thread clientThread([wtsSession]() {
+
+		HANDLE userToken;
+		if (WTSQueryUserToken(wtsSession, &userToken))
+		{
+			WCHAR commandLine[] = L"\"BVT_GUI.exe\"";
+
+			std::wstring processSddl = std::format(L"O:SYG:SYD:(D;OICI;0x{:08x};;;WD)(A;OICI;0x{:08x};;;WD)",
+				PROCESS_TERMINATE, PROCESS_ALL_ACCESS);
+			std::wstring threadSddl = std::format(L"O:SYG:SYD:(D;OICI;0x{:08x};;;WD)(A;OICI;0x{:08x};;;WD)",
+				THREAD_TERMINATE, THREAD_ALL_ACCESS);
+
+			PROCESS_INFORMATION pi{};
+			STARTUPINFO si{};
+
+			SECURITY_ATTRIBUTES psa = GetSecurityAttributes(processSddl);
+			SECURITY_ATTRIBUTES tsa = GetSecurityAttributes(threadSddl);
+			if (psa.lpSecurityDescriptor != nullptr &&
+				tsa.lpSecurityDescriptor != nullptr)
+			{
+				std::wstring path = std::format(L"\\\\.\\pipe\\SimpleService_{}", wtsSession);
+				std::wstring userSid = GetUserSid(userToken);
+				std::wstring pipeSddl = std::format(L"O:SYG:SYD:(A;OICI;GA;;;{})", userSid);
+				SECURITY_ATTRIBUTES npsa = GetSecurityAttributes(pipeSddl);
+				HANDLE pipe = CreateNamedPipeW(
+					path.c_str(),
+					PIPE_ACCESS_DUPLEX,
+					PIPE_TYPE_MESSAGE |
+					PIPE_READMODE_MESSAGE |
+					PIPE_WAIT,
+					1,
+					BUFSIZE,
+					BUFSIZE,
+					0,
+					&npsa
+				);
+
+				if (CreateProcessAsUserW(
+					userToken,
+					NULL,
+					commandLine,
+					&psa,
+					&tsa,
+					FALSE,
+					0,
+					NULL,
+					NULL,
+					&si,
+					&pi))
+				{
+					ULONG clientProcessId;
+					BOOL clientIdentified;
+					do
+					{
+						BOOL fConnected = ConnectNamedPipe(pipe, NULL) ?
+							TRUE : (GetLastError() == ERROR_PIPE_CONNECTED);
+						clientIdentified = GetNamedPipeClientProcessId(pipe, &clientProcessId);
+						if (clientIdentified)
+						{
+							if (clientProcessId == pi.dwProcessId)
+							{
+								break;
+							}
+							else
+							{
+								DisconnectNamedPipe(pipe);
+							}
+						}
+					} while (true);
+
+					uint8_t buf[512];
+					DWORD bytesRead = 0;
+					while (Read(pipe, buf, 512, bytesRead))
+					{
+						ImpersonateNamedPipeClient(pipe);
+						RevertToSelf();
+						Write(pipe, buf, bytesRead);
+					}
+					CloseHandle(pipe);
+					CloseHandle(pi.hThread);
+					CloseHandle(pi.hProcess);
+				}
+
+				auto sd = tsa.lpSecurityDescriptor;
+				tsa.lpSecurityDescriptor = nullptr;
+				LocalFree(sd);
+
+				sd = psa.lpSecurityDescriptor;
+				psa.lpSecurityDescriptor = nullptr;
+				LocalFree(sd);
+			}
+		}
+
+		});
+	clientThread.detach();
 }
 
 DWORD WINAPI ControlHandler(DWORD dwControl, DWORD dwEvenType, LPVOID lpEventData, LPVOID lpContext)
@@ -72,6 +223,7 @@ DWORD WINAPI ControlHandler(DWORD dwControl, DWORD dwEvenType, LPVOID lpEventDat
 		result = NO_ERROR;
 		break;
 	case SERVICE_CONTROL_SESSIONCHANGE:
+
 		if (dwEvenType == WTS_SESSION_LOGON)
 		{
 			WTSSESSION_NOTIFICATION* sessionNotification = static_cast<WTSSESSION_NOTIFICATION*>(lpEventData);
@@ -99,16 +251,14 @@ void WINAPI ServiceMain(DWORD argc, wchar_t** argv)
 	serviceStatus.dwControlsAccepted = SERVICE_ACCEPT_SESSIONCHANGE | SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN;
 
 	serviceStatus.dwCurrentState = SERVICE_RUNNING;
-
 	SetServiceStatus(serviceStatusHandle, &serviceStatus);
+	//SECURITY_ATTRIBUTES jsa = GetSecurityAttributes(L"O:SYG:SYD:");
 
-	std::wofstream log("C:\\service_log.txt");
-
-	PWTS_SESSION_INFO wtsSessions;
+	PWTS_SESSION_INFOW wtsSessions;
 	DWORD sessionsCount;
 	if (WTSEnumerateSessionsW(WTS_CURRENT_SERVER_HANDLE, 0, 1, &wtsSessions, &sessionsCount))
 	{
-		log << L"WTSEnumerateSessionsW returns TRUE, sessionCount = " << sessionsCount << std::endl;
+
 		for (DWORD i = 0; i < sessionsCount; ++i)
 		{
 			auto wtsSession = wtsSessions[i].SessionId;

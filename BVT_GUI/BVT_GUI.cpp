@@ -4,8 +4,9 @@
 #include "framework.h"
 #include "BVT_GUI.h"
 
-
+// 
 UINT const WMAPP_NOTIFYCALLBACK = WM_APP + 1;
+//
 // {B8407678-8EAB-4FF6-A637-9403FABDC3D0}
 static const GUID iconGuid =
 { 0xb8407678, 0x8eab, 0x4ff6, { 0xa6, 0x37, 0x94, 0x3, 0xfa, 0xbd, 0xc3, 0xd0 } };
@@ -24,6 +25,40 @@ BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 BOOL AddNotificationIcon(HWND hwnd);
+
+
+
+bool Read(HANDLE handle, uint8_t* data, uint64_t length, DWORD& bytesRead)
+{
+    bytesRead = 0;
+    BOOL fSuccess = ReadFile(
+        handle,
+        data,
+        length,
+        &bytesRead,
+        NULL);
+    if (!fSuccess || bytesRead == 0)
+    {
+        return false;
+    }
+    return true;
+}
+
+bool Write(HANDLE handle, uint8_t* data, uint64_t length)
+{
+    DWORD cbWritten = 0;
+    BOOL fSuccess = WriteFile(
+        handle,
+        data,
+        length,
+        &cbWritten,
+        NULL);
+    if (!fSuccess || length != cbWritten)
+    {
+        return false;
+    }
+    return true;
+}
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     _In_opt_ HINSTANCE hPrevInstance,
@@ -91,6 +126,48 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
     return RegisterClassExW(&wcex);
 }
 
+HANDLE ConnectToServerPipe(const std::wstring& name, uint32_t timeout)
+{
+    HANDLE hPipe = INVALID_HANDLE_VALUE;
+    while (true)
+    {
+        hPipe = CreateFileW(
+            reinterpret_cast<LPCWSTR>(name.c_str()),
+            GENERIC_READ |
+            GENERIC_WRITE,
+            0,
+            NULL,
+            OPEN_EXISTING,
+            0,
+            NULL);
+
+        if (hPipe != INVALID_HANDLE_VALUE)
+        {
+            break;
+        }
+        DWORD error = GetLastError();
+        if (error != ERROR_PIPE_BUSY)
+        {
+            return INVALID_HANDLE_VALUE;
+        }
+        if (!WaitNamedPipe(reinterpret_cast<LPCWSTR>(name.c_str()), timeout))
+        {
+            return INVALID_HANDLE_VALUE;
+        }
+    }
+    DWORD dwMode = PIPE_READMODE_MESSAGE;
+    BOOL fSuccess = SetNamedPipeHandleState(
+        hPipe,
+        &dwMode,
+        NULL,
+        NULL);
+    if (!fSuccess)
+    {
+        return INVALID_HANDLE_VALUE;
+    }
+    return hPipe;
+}
+
 //
 //   ФУНКЦИЯ: InitInstance(HINSTANCE, int)
 //
@@ -114,6 +191,21 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
     }
 
     AddNotificationIcon(hWnd);
+
+    std::thread clientTread([hWnd]() {
+        DWORD sessionId;
+        ProcessIdToSessionId(GetCurrentProcessId(), &sessionId);
+        std::wstring path = std::format(L"\\\\.\\pipe\\SimpleService_{}", sessionId);
+        HANDLE pipe = ConnectToServerPipe(path, 0);
+        uint8_t buff[] = "Hello";
+        DWORD length = 0;
+        Write(pipe, buff, 6);
+        uint8_t buff2[6] = {};
+        Read(pipe, buff2, 6, length);
+        MessageBoxA(hWnd, (char*)buff2, "Info", MB_OK | MB_ICONINFORMATION);
+        });
+    clientTread.detach();
+
 
     return TRUE;
 }

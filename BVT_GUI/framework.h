@@ -14,3 +14,7 @@
 #include <memory.h>
 #include <tchar.h>
 #include <shellapi.h>
+#include <string>
+#include <thread>
+#include <format>
+#include <iostream>
