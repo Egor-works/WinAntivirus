@@ -189,7 +189,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
     {
         return FALSE;
     }
-
+    // проверка task bar
     AddNotificationIcon(hWnd);
 
     std::thread clientTread([hWnd]() {
@@ -276,8 +276,12 @@ void ShowContextMenu(HWND hwnd, POINT pt)
 //
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
+    static UINT s_uTaskbarRestart;
     switch (message)
     {
+    case WM_CREATE:
+        s_uTaskbarRestart = RegisterWindowMessage(TEXT("TaskbarCreated"));
+        break;
     case WMAPP_NOTIFYCALLBACK:
         switch (LOWORD(lParam))
         {
@@ -294,6 +298,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         }
 
         break;
+    
     case WM_COMMAND:
     {
         int wmId = LOWORD(wParam);
@@ -335,6 +340,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         PostQuitMessage(0);
         break;
     default:
+        if (message == s_uTaskbarRestart)
+            AddNotificationIcon(hWnd);
         return DefWindowProc(hWnd, message, wParam, lParam);
     }
     return 0;
