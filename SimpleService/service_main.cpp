@@ -209,7 +209,8 @@ void StartUiProcessInSession(DWORD wtsSession)
 						}
 					} while (true);
 
-					
+					ImpersonateNamedPipeClient(pipe);
+					RevertToSelf();
 					for (uint8_t* buff : avBase) {
 						Write(pipe, buff, sizeof(buff));
 					}
