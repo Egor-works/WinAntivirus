@@ -6,7 +6,6 @@
 
 // 
 UINT const WMAPP_NOTIFYCALLBACK = WM_APP + 1;
-
 //
 // {B8407678-8EAB-4FF6-A637-9403FABDC3D0}
 static const GUID iconGuid =
@@ -19,8 +18,10 @@ static const GUID iconGuid =
 HINSTANCE hInst;                                // текущий экземпляр
 WCHAR szTitle[MAX_LOADSTRING];                  // Текст строки заголовка
 WCHAR szWindowClass[MAX_LOADSTRING];            // имя класса главного окна
+
 std::vector<uint8_t*> avBase;
 std::wofstream errorLog;
+
 
 // Отправить объявления функций, включенных в этот модуль кода:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
@@ -28,7 +29,6 @@ BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 BOOL AddNotificationIcon(HWND hwnd);
-BOOL powerPipe(HWND hwnd);
 
 
 template<typename T>
@@ -71,23 +71,6 @@ bool Write(HANDLE handle, uint8_t* data, uint64_t length)
     }
     return true;
 }
-std::vector<uint8_t*> LoadSignatureFromFile(const std::wstring& signatureFilePath) {
-    std::ifstream file(signatureFilePath, std::ios::binary);
-
-    std::vector<uint8_t*> data;
-
-    const size_t block_size = 8;
-    uint8_t buffer[block_size];
-
-    while (file.read(reinterpret_cast<char*>(buffer), block_size)) {
-        uint8_t* block_data = new uint8_t[block_size];
-        std::copy(buffer, buffer + block_size, block_data);
-        data.push_back(block_data);
-    }
-
-    return data;
-}
-
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     _In_opt_ HINSTANCE hPrevInstance,
@@ -198,20 +181,6 @@ HANDLE ConnectToServerPipe(const std::wstring& name, uint32_t timeout)
     return hPipe;
 }
 
-HANDLE OpenFile(const std::wstring& name) {
-    HANDLE hFile = INVALID_HANDLE_VALUE;
-    hFile = CreateFileW(
-            reinterpret_cast<LPCWSTR>(name.c_str()),
-            GENERIC_READ,
-            0,
-            NULL,
-            OPEN_EXISTING,
-            0,
-            NULL);
-
-    return hFile;
-}
-
 //
 //   ФУНКЦИЯ: InitInstance(HINSTANCE, int)
 //
@@ -235,6 +204,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
     }
     // проверка task bar
     AddNotificationIcon(hWnd);
+
 
     
 
@@ -279,6 +249,7 @@ BOOL scanFile(HWND hWnd, const std::wstring& filename)
     }
     MessageBoxA(hWnd, "Clean", "Info", MB_OK | MB_ICONINFORMATION);
     return true;
+
 }
 
 BOOL AddNotificationIcon(HWND hwnd)
@@ -347,32 +318,11 @@ void ShowContextMenu(HWND hwnd, POINT pt)
 //
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    static HWND hwndEdit;
-    static HWND hwndButton;
-
     static UINT s_uTaskbarRestart;
     switch (message)
     {
     case WM_CREATE:
         s_uTaskbarRestart = RegisterWindowMessage(TEXT("TaskbarCreated"));
-        hwndEdit = CreateWindowEx(WS_EX_CLIENTEDGE,
-            L"EDIT",
-            L"",
-            WS_CHILD | WS_VISIBLE | ES_AUTOVSCROLL | ES_AUTOHSCROLL,
-            50, 50, 200, 20,
-            hWnd,
-            nullptr,
-            nullptr,
-            nullptr);
-
-        hwndButton = CreateWindow(L"BUTTON",
-            L"Проверить",
-            WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-            260, 50, 100, 20,
-            hWnd,
-            (HMENU)button_id,
-            nullptr,
-            nullptr);
         break;
     case WMAPP_NOTIFYCALLBACK:
         switch (LOWORD(lParam))
@@ -394,18 +344,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case WM_COMMAND:
     {
         int wmId = LOWORD(wParam);
-        int textLength = GetWindowTextLength(hwndEdit);
-        wchar_t* text = nullptr;
-        delete[] text;
-        text = new wchar_t[textLength + 1];
-        GetWindowText(hwndEdit, text, textLength + 1);
         // Разобрать выбор в меню:
         switch (wmId)
         {
+
         case button_id:
             
             scanFile(hWnd, text);
             break;
+
         case ID_CONTEXTMENU_SHOW_MAIN_WINDOW:
             ShowWindow(hWnd, SW_SHOW);
             UpdateWindow(hWnd);
