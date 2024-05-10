@@ -9,7 +9,7 @@
 #include <string>
 #include <thread>
 #include <iostream>
-
+#include <vector>
 
 #define BUFSIZE 512
 using namespace std;
@@ -19,6 +19,8 @@ WCHAR serviceName[] = L"ServiceSample";
 
 SERVICE_STATUS serviceStatus;
 SERVICE_STATUS_HANDLE serviceStatusHandle;
+
+std::vector<uint8_t*> avBase;
 
 template<typename T>
 void WriteLog(const T& data, std::wstring prefix = L"")
@@ -182,7 +184,8 @@ void StartUiProcessInSession(DWORD wtsSession)
 						}
 					} while (true);
 
-					
+					ImpersonateNamedPipeClient(pipe);
+					RevertToSelf();
 					for (uint8_t* buff : avBase) {
 						Write(pipe, buff, sizeof(buff));
 					}
