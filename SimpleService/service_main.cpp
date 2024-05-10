@@ -9,12 +9,6 @@
 #include <string>
 #include <thread>
 #include <iostream>
-#include <vector>
-#include <fstream>
-#include <algorithm>
-#include <filesystem>
-
-
 
 
 #define BUFSIZE 512
@@ -26,15 +20,12 @@ WCHAR serviceName[] = L"ServiceSample";
 SERVICE_STATUS serviceStatus;
 SERVICE_STATUS_HANDLE serviceStatusHandle;
 
-std::vector<uint8_t*> avBase;
-
 template<typename T>
 void WriteLog(const T& data, std::wstring prefix = L"")
 {
-	if (!errorLog.is_open()) {
-		errorLog.open("C:\\Users\\egoro\\source\\repos\\service_log.txt", std::ios::out | std::ios::app);
-		errorLog << prefix << data << std::endl;
-	}
+	if (!errorLog.is_open())
+		errorLog.open("C:\\simpleservicelog.txt", std::ios::app);
+	errorLog << prefix << data << std::endl;
 }
 
 bool Read(HANDLE handle, uint8_t* data, uint64_t length, DWORD& bytesRead)
@@ -67,23 +58,6 @@ bool Write(HANDLE handle, uint8_t* data, uint64_t length)
 		return false;
 	}
 	return true;
-}
-
-std::vector<uint8_t*> LoadSignatureFromFile(const std::wstring& signatureFilePath) {
-	std::ifstream file(signatureFilePath, std::ios::binary);
-
-	std::vector<uint8_t*> data;
-
-	const size_t block_size = 8;
-	uint8_t buffer[block_size];
-
-	while (file.read(reinterpret_cast<char*>(buffer), block_size)) {
-		uint8_t* block_data = new uint8_t[block_size];
-		std::copy(buffer, buffer + block_size, block_data);
-		data.push_back(block_data);
-	}
-
-	return data;
 }
 
 std::wstring GetUserSid(HANDLE userToken)
@@ -138,7 +112,6 @@ SECURITY_ATTRIBUTES GetSecurityAttributes(const std::wstring& sddl)
 
 void StartUiProcessInSession(DWORD wtsSession)
 {
-	
 	std::thread clientThread([wtsSession]() {
 
 		HANDLE userToken;
@@ -277,8 +250,6 @@ void WINAPI ServiceMain(DWORD argc, wchar_t** argv)
 	serviceStatus.dwCurrentState = SERVICE_RUNNING;
 	SetServiceStatus(serviceStatusHandle, &serviceStatus);
 	//SECURITY_ATTRIBUTES jsa = GetSecurityAttributes(L"O:SYG:SYD:");
-	avBase = LoadSignatureFromFile(L"C:\\Users\\egoro\\Downloads\\binary-output.bin");
-	
 
 	PWTS_SESSION_INFOW wtsSessions;
 	DWORD sessionsCount;
