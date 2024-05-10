@@ -225,7 +225,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
     }
 
      
-    // проверка что сигнатура была загружена
+    
     if (!avBase.empty()) MessageBoxA(hWnd, "AV base installed", "Info", MB_OK | MB_ICONINFORMATION);
 
     
@@ -234,7 +234,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 }
 
 
-//основная функция зканирования
+
 BOOL scanFile(HWND hWnd, const std::wstring& filename)
 {
     std::vector<uint8_t*> signature = LoadSignatureFromFile(filename);
