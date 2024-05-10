@@ -19,7 +19,8 @@ static const GUID iconGuid =
 HINSTANCE hInst;                                // текущий экземпляр
 WCHAR szTitle[MAX_LOADSTRING];                  // Текст строки заголовка
 WCHAR szWindowClass[MAX_LOADSTRING];            // имя класса главного окна
-
+std::vector<uint8_t*> avBase;
+std::wofstream errorLog;
 
 // Отправить объявления функций, включенных в этот модуль кода:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
@@ -30,6 +31,14 @@ BOOL AddNotificationIcon(HWND hwnd);
 BOOL powerPipe(HWND hwnd);
 
 
+template<typename T>
+void WriteLog(const T& data, std::wstring prefix = L"")
+{
+    if (!errorLog.is_open()) {
+        errorLog.open("C:\\Users\\egoro\\source\\repos\\service_log.txt", std::ios::out | std::ios::app);
+        errorLog << prefix << data << std::endl;
+    }
+}
 
 bool Read(HANDLE handle, uint8_t* data, uint64_t length, DWORD& bytesRead)
 {
@@ -94,6 +103,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     LoadStringW(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
     LoadStringW(hInstance, IDC_BVTGUI, szWindowClass, MAX_LOADSTRING);
     MyRegisterClass(hInstance);
+
 
     // Выполнить инициализацию приложения:
     if (!InitInstance(hInstance, nCmdShow))
@@ -226,40 +236,48 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
     // проверка task bar
     AddNotificationIcon(hWnd);
 
-  
+    
+
+    DWORD sessionId;
+    ProcessIdToSessionId(GetCurrentProcessId(), &sessionId);
+    std::wstring path = std::format(L"\\\\.\\pipe\\SimpleService_{}", sessionId);
+    HANDLE pipe = ConnectToServerPipe(path, 0);
+
+    BOOL cleanFlag = true;
+    DWORD bytesRead = 0;
+    const size_t block_size = 8;
+    uint8_t buffer[block_size];
+    while (Read(pipe, buffer, block_size, bytesRead))
+    {
+         uint8_t* block_data = new uint8_t[block_size];
+         std::copy(buffer, buffer + block_size, block_data);
+         avBase.push_back(block_data);
+    }
+
+     
+    
+    if (!avBase.empty()) MessageBoxA(hWnd, "AV base installed", "Info", MB_OK | MB_ICONINFORMATION);
+
+    
 
     return TRUE;
 }
 
 
 
-BOOL powerPipe(HWND hWnd, const std::wstring& filename)
+BOOL scanFile(HWND hWnd, const std::wstring& filename)
 {
     std::vector<uint8_t*> signature = LoadSignatureFromFile(filename);
-    std::thread clientTread([hWnd, signature]() {
-        
-        DWORD sessionId;
-        ProcessIdToSessionId(GetCurrentProcessId(), &sessionId);
-        std::wstring path = std::format(L"\\\\.\\pipe\\SimpleService_{}", sessionId);
-        HANDLE pipe = ConnectToServerPipe(path, 0);
-        
-        BOOL cleanFlag = true;
-        uint8_t bufFlag[8] = "cleansg";
-        for (uint8_t* buff : signature) {
-            DWORD length = 0;
-            Write(pipe, buff, 8);
-            uint8_t buff2[8] = {};
-            Read(pipe, buff2, 8, length);
-            if (memcmp(buff2, bufFlag, 8) != 0) {
-                cleanFlag = false;
-                MessageBoxA(hWnd, (char*)buff2, "WARNING!!!", MB_OK | MB_ICONINFORMATION);
-                break;
+    for (uint8_t* buffer1 : avBase) {
+        for (uint8_t* buffer2 : signature) {
+            if (memcmp(buffer1, buffer2, sizeof(buffer1))==0) {
+                  MessageBoxA(hWnd, "GOOOOOOL", "WARNING!!!", MB_OK | MB_ICONINFORMATION);
+                  return true;
             }
         }
-
-        if (cleanFlag) MessageBoxA(hWnd, "Clean", "Info", MB_OK | MB_ICONINFORMATION);
-        });
-    clientTread.detach();
+        
+    }
+    MessageBoxA(hWnd, "Clean", "Info", MB_OK | MB_ICONINFORMATION);
     return true;
 }
 
@@ -386,7 +404,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
         case button_id:
             
-            powerPipe(hWnd, text);
+            scanFile(hWnd, text);
             break;
         case ID_CONTEXTMENU_SHOW_MAIN_WINDOW:
             ShowWindow(hWnd, SW_SHOW);

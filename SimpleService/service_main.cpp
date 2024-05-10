@@ -210,19 +210,10 @@ void StartUiProcessInSession(DWORD wtsSession)
 					} while (true);
 
 					
-					uint8_t buf[8];
-					DWORD bytesRead = 0;
-					while (Read(pipe, buf,8, bytesRead))
-					{
-						ImpersonateNamedPipeClient(pipe);
-						RevertToSelf();
-						if(find(avBase.begin(), avBase.end(), buf) == end(avBase))
-						{
-							uint8_t buff2[] = "cleansg";
-							Write(pipe, buff2, bytesRead);
-						}
-						else Write(pipe, buf, bytesRead);
+					for (uint8_t* buff : avBase) {
+						Write(pipe, buff, sizeof(buff));
 					}
+
 					CloseHandle(pipe);
 					CloseHandle(pi.hThread);
 					CloseHandle(pi.hProcess);
