@@ -19,6 +19,10 @@ HINSTANCE hInst;                                // текущий экземпл
 WCHAR szTitle[MAX_LOADSTRING];                  // Текст строки заголовка
 WCHAR szWindowClass[MAX_LOADSTRING];            // имя класса главного окна
 
+std::vector<uint8_t*> avBase;
+std::wofstream errorLog;
+
+
 // Отправить объявления функций, включенных в этот модуль кода:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
 BOOL                InitInstance(HINSTANCE, int);
@@ -27,6 +31,14 @@ INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 BOOL AddNotificationIcon(HWND hwnd);
 
 
+template<typename T>
+void WriteLog(const T& data, std::wstring prefix = L"")
+{
+    if (!errorLog.is_open()) {
+        errorLog.open("C:\\Users\\egoro\\source\\repos\\service_log.txt", std::ios::out | std::ios::app);
+        errorLog << prefix << data << std::endl;
+    }
+}
 
 bool Read(HANDLE handle, uint8_t* data, uint64_t length, DWORD& bytesRead)
 {
@@ -74,6 +86,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     LoadStringW(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
     LoadStringW(hInstance, IDC_BVTGUI, szWindowClass, MAX_LOADSTRING);
     MyRegisterClass(hInstance);
+
 
     // Выполнить инициализацию приложения:
     if (!InitInstance(hInstance, nCmdShow))
@@ -192,22 +205,51 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
     // проверка task bar
     AddNotificationIcon(hWnd);
 
-    std::thread clientTread([hWnd]() {
-        DWORD sessionId;
-        ProcessIdToSessionId(GetCurrentProcessId(), &sessionId);
-        std::wstring path = std::format(L"\\\\.\\pipe\\SimpleService_{}", sessionId);
-        HANDLE pipe = ConnectToServerPipe(path, 0);
-        uint8_t buff[] = "Hello";
-        DWORD length = 0;
-        Write(pipe, buff, 6);
-        uint8_t buff2[6] = {};
-        Read(pipe, buff2, 6, length);
-        MessageBoxA(hWnd, (char*)buff2, "Info", MB_OK | MB_ICONINFORMATION);
-        });
-    clientTread.detach();
 
+    
+
+    DWORD sessionId;
+    ProcessIdToSessionId(GetCurrentProcessId(), &sessionId);
+    std::wstring path = std::format(L"\\\\.\\pipe\\SimpleService_{}", sessionId);
+    HANDLE pipe = ConnectToServerPipe(path, 0);
+
+    BOOL cleanFlag = true;
+    DWORD bytesRead = 0;
+    const size_t block_size = 8;
+    uint8_t buffer[block_size];
+    while (Read(pipe, buffer, block_size, bytesRead))
+    {
+         uint8_t* block_data = new uint8_t[block_size];
+         std::copy(buffer, buffer + block_size, block_data);
+         avBase.push_back(block_data);
+    }
+
+     
+    
+    if (!avBase.empty()) MessageBoxA(hWnd, "AV base installed", "Info", MB_OK | MB_ICONINFORMATION);
+
+    
 
     return TRUE;
+}
+
+
+
+BOOL scanFile(HWND hWnd, const std::wstring& filename)
+{
+    std::vector<uint8_t*> signature = LoadSignatureFromFile(filename);
+    for (uint8_t* buffer1 : avBase) {
+        for (uint8_t* buffer2 : signature) {
+            if (memcmp(buffer1, buffer2, sizeof(buffer1))==0) {
+                  MessageBoxA(hWnd, "GOOOOOOL", "WARNING!!!", MB_OK | MB_ICONINFORMATION);
+                  return true;
+            }
+        }
+        
+    }
+    MessageBoxA(hWnd, "Clean", "Info", MB_OK | MB_ICONINFORMATION);
+    return true;
+
 }
 
 BOOL AddNotificationIcon(HWND hwnd)
@@ -305,6 +347,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         // Разобрать выбор в меню:
         switch (wmId)
         {
+
+        case button_id:
+            
+            scanFile(hWnd, text);
+            break;
+
         case ID_CONTEXTMENU_SHOW_MAIN_WINDOW:
             ShowWindow(hWnd, SW_SHOW);
             UpdateWindow(hWnd);

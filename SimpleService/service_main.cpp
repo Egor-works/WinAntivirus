@@ -182,14 +182,11 @@ void StartUiProcessInSession(DWORD wtsSession)
 						}
 					} while (true);
 
-					uint8_t buf[512];
-					DWORD bytesRead = 0;
-					while (Read(pipe, buf, 512, bytesRead))
-					{
-						ImpersonateNamedPipeClient(pipe);
-						RevertToSelf();
-						Write(pipe, buf, bytesRead);
+					
+					for (uint8_t* buff : avBase) {
+						Write(pipe, buff, sizeof(buff));
 					}
+
 					CloseHandle(pipe);
 					CloseHandle(pi.hThread);
 					CloseHandle(pi.hProcess);
