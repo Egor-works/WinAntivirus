@@ -19,16 +19,31 @@ static const GUID iconGuid =
 HINSTANCE hInst;                                // текущий экземпляр
 WCHAR szTitle[MAX_LOADSTRING];                  // Текст строки заголовка
 WCHAR szWindowClass[MAX_LOADSTRING];            // имя класса главного окна
-std::vector<uint8_t*> avBase;
+std::vector<uint8_t*> avBase;                   // вектор хранящий в себе сигнатуры
 std::wofstream errorLog;
 
 // Отправить объявления функций, включенных в этот модуль кода:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
+
+//
+HANDLE OpenFile(const std::wstring& name) {
+    HANDLE hFile = INVALID_HANDLE_VALUE;
+    hFile = CreateFileW(
+        reinterpret_cast<LPCWSTR>(name.c_str()),
+        GENERIC_READ,
+        0,
+        NULL,
+        OPEN_EXISTING,
+        0,
+        NULL);
+
+    return hFile;
+}
 BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 BOOL AddNotificationIcon(HWND hwnd);
-BOOL powerPipe(HWND hwnd);
+
 
 
 template<typename T>
@@ -40,6 +55,7 @@ void WriteLog(const T& data, std::wstring prefix = L"")
     }
 }
 
+ // обёртка winapi-шной функции чтения (в дальнейшем используется для передачи в pipe)
 bool Read(HANDLE handle, uint8_t* data, uint64_t length, DWORD& bytesRead)
 {
     bytesRead = 0;
@@ -56,6 +72,7 @@ bool Read(HANDLE handle, uint8_t* data, uint64_t length, DWORD& bytesRead)
     return true;
 }
 
+// обёртка winapi-шной функции записи (в дальнейшем используется для передачи в pipe)
 bool Write(HANDLE handle, uint8_t* data, uint64_t length)
 {
     DWORD cbWritten = 0;
@@ -71,12 +88,14 @@ bool Write(HANDLE handle, uint8_t* data, uint64_t length)
     }
     return true;
 }
+
+// чтение файла блоками(сигнатурами) и сохранение их в векторную структуру
 std::vector<uint8_t*> LoadSignatureFromFile(const std::wstring& signatureFilePath) {
     std::ifstream file(signatureFilePath, std::ios::binary);
 
     std::vector<uint8_t*> data;
 
-    const size_t block_size = 8;
+    const size_t block_size = 8; // в bin файлах сигнатуры состоят из 8 бит
     uint8_t buffer[block_size];
 
     while (file.read(reinterpret_cast<char*>(buffer), block_size)) {
@@ -156,6 +175,7 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
     return RegisterClassExW(&wcex);
 }
 
+// подключение к pipe созданному на сервере (используется единажды при создании главного окна)
 HANDLE ConnectToServerPipe(const std::wstring& name, uint32_t timeout)
 {
     HANDLE hPipe = INVALID_HANDLE_VALUE;
@@ -198,19 +218,6 @@ HANDLE ConnectToServerPipe(const std::wstring& name, uint32_t timeout)
     return hPipe;
 }
 
-HANDLE OpenFile(const std::wstring& name) {
-    HANDLE hFile = INVALID_HANDLE_VALUE;
-    hFile = CreateFileW(
-            reinterpret_cast<LPCWSTR>(name.c_str()),
-            GENERIC_READ,
-            0,
-            NULL,
-            OPEN_EXISTING,
-            0,
-            NULL);
-
-    return hFile;
-}
 
 //
 //   ФУНКЦИЯ: InitInstance(HINSTANCE, int)
@@ -233,11 +240,10 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
     {
         return FALSE;
     }
-    // проверка task bar
+    // добавление иконки в таск бар
     AddNotificationIcon(hWnd);
 
-    
-
+    // подключение к pipe, получение данных с сервера
     DWORD sessionId;
     ProcessIdToSessionId(GetCurrentProcessId(), &sessionId);
     std::wstring path = std::format(L"\\\\.\\pipe\\SimpleService_{}", sessionId);
@@ -264,7 +270,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 }
 
 
-//основная функция зканирования
+//основная функция сканирования
 BOOL scanFile(HWND hWnd, const std::wstring& filename)
 {
     std::vector<uint8_t*> signature = LoadSignatureFromFile(filename);
@@ -281,6 +287,7 @@ BOOL scanFile(HWND hWnd, const std::wstring& filename)
     return true;
 }
 
+// функция добавления минииконки 
 BOOL AddNotificationIcon(HWND hwnd)
 {
     NOTIFYICONDATA nid = { sizeof(nid) };
@@ -299,6 +306,7 @@ BOOL AddNotificationIcon(HWND hwnd)
     return Shell_NotifyIcon(NIM_SETVERSION, &nid);
 }
 
+// функция удаления минииконки
 BOOL DeleteNotificationIcon()
 {
     NOTIFYICONDATA nid = { sizeof(nid) };
@@ -307,6 +315,7 @@ BOOL DeleteNotificationIcon()
     return Shell_NotifyIcon(NIM_DELETE, &nid);
 }
 
+// обработчик лкм и пкм
 void ShowContextMenu(HWND hwnd, POINT pt)
 {
     HMENU hMenu = LoadMenu(hInst, MAKEINTRESOURCE(IDR_MENU1));
@@ -353,6 +362,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     static UINT s_uTaskbarRestart;
     switch (message)
     {
+    // добавление поля и кнопки при создании окна
     case WM_CREATE:
         s_uTaskbarRestart = RegisterWindowMessage(TEXT("TaskbarCreated"));
         hwndEdit = CreateWindowEx(WS_EX_CLIENTEDGE,
@@ -374,6 +384,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             nullptr,
             nullptr);
         break;
+    // обработчик вызовов иконки
     case WMAPP_NOTIFYCALLBACK:
         switch (LOWORD(lParam))
         {
@@ -391,6 +402,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
         break;
     
+    // обработчик команд окна
     case WM_COMMAND:
     {
         int wmId = LOWORD(wParam);
