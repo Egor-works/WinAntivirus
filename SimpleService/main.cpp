@@ -5,7 +5,6 @@ extern WCHAR serviceName[];
 void WINAPI ServiceMain(DWORD argc, wchar_t** argv);
 
 
-
 int wmain(int argc, wchar_t** argv)
 {
 
@@ -13,7 +12,7 @@ int wmain(int argc, wchar_t** argv)
 		std::wcout << L"\"" << argv[i] << L"\" ";
 
 	
-
+	//создание и запуск сервиса
 	SERVICE_TABLE_ENTRYW ServiceTable[2];
 	ServiceTable[0].lpServiceName = serviceName;
 	ServiceTable[0].lpServiceProc = (LPSERVICE_MAIN_FUNCTIONW)ServiceMain;

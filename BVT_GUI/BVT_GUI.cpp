@@ -25,20 +25,7 @@ std::wofstream errorLog;
 // Отправить объявления функций, включенных в этот модуль кода:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
 
-//
-HANDLE OpenFile(const std::wstring& name) {
-    HANDLE hFile = INVALID_HANDLE_VALUE;
-    hFile = CreateFileW(
-        reinterpret_cast<LPCWSTR>(name.c_str()),
-        GENERIC_READ,
-        0,
-        NULL,
-        OPEN_EXISTING,
-        0,
-        NULL);
 
-    return hFile;
-}
 BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);

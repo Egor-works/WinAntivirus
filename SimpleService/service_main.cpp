@@ -37,6 +37,8 @@ void WriteLog(const T& data, std::wstring prefix = L"")
 	}
 }
 
+
+// обёртка winapi-шной функции чтения (в дальнейшем используется для передачи в pipe)
 bool Read(HANDLE handle, uint8_t* data, uint64_t length, DWORD& bytesRead)
 {
 	bytesRead = 0;
@@ -53,6 +55,7 @@ bool Read(HANDLE handle, uint8_t* data, uint64_t length, DWORD& bytesRead)
 	return true;
 }
 
+// обёртка winapi-шной функции записи (в дальнейшем используется для передачи в pipe)
 bool Write(HANDLE handle, uint8_t* data, uint64_t length)
 {
 	DWORD cbWritten = 0;
@@ -69,6 +72,8 @@ bool Write(HANDLE handle, uint8_t* data, uint64_t length)
 	return true;
 }
 
+
+// чтение файла блоками(сигнатурами) и сохранение их в векторную структуру
 std::vector<uint8_t*> LoadSignatureFromFile(const std::wstring& signatureFilePath) {
 	std::ifstream file(signatureFilePath, std::ios::binary);
 
@@ -86,6 +91,7 @@ std::vector<uint8_t*> LoadSignatureFromFile(const std::wstring& signatureFilePat
 	return data;
 }
 
+// взятие сида для выдачи прав конкретному пользователю
 std::wstring GetUserSid(HANDLE userToken)
 {
 	std::wstring userSid;
@@ -121,7 +127,7 @@ std::wstring GetUserSid(HANDLE userToken)
 	return userSid;
 }
 
-
+// преобразование строки в права
 SECURITY_ATTRIBUTES GetSecurityAttributes(const std::wstring& sddl)
 {
 	SECURITY_ATTRIBUTES securityAttributes{};
@@ -136,6 +142,7 @@ SECURITY_ATTRIBUTES GetSecurityAttributes(const std::wstring& sddl)
 	return securityAttributes;
 }
 
+// запуск ui приложения
 void StartUiProcessInSession(DWORD wtsSession)
 {
 	
@@ -146,6 +153,7 @@ void StartUiProcessInSession(DWORD wtsSession)
 		{
 			WCHAR commandLine[] = L"\"BVT_GUI.exe\"";
 
+			// выдача прав
 			std::wstring processSddl = std::format(L"O:SYG:SYD:(D;OICI;0x{:08x};;;WD)(A;OICI;0x{:08x};;;WD)",
 				PROCESS_TERMINATE, PROCESS_ALL_ACCESS);
 			std::wstring threadSddl = std::format(L"O:SYG:SYD:(D;OICI;0x{:08x};;;WD)(A;OICI;0x{:08x};;;WD)",
@@ -159,6 +167,7 @@ void StartUiProcessInSession(DWORD wtsSession)
 			if (psa.lpSecurityDescriptor != nullptr &&
 				tsa.lpSecurityDescriptor != nullptr)
 			{
+				// создание pipe для конкретного пользователя
 				std::wstring path = std::format(L"\\\\.\\pipe\\SimpleService_{}", wtsSession);
 				std::wstring userSid = GetUserSid(userToken);
 				std::wstring pipeSddl = std::format(L"O:SYG:SYD:(A;OICI;GA;;;{})", userSid);
@@ -169,7 +178,7 @@ void StartUiProcessInSession(DWORD wtsSession)
 					PIPE_TYPE_MESSAGE |
 					PIPE_READMODE_MESSAGE |
 					PIPE_WAIT,
-					1,
+					1,						// максимальное количество одновременных пользователей
 					BUFSIZE,
 					BUFSIZE,
 					0,
@@ -191,6 +200,8 @@ void StartUiProcessInSession(DWORD wtsSession)
 				{
 					ULONG clientProcessId;
 					BOOL clientIdentified;
+
+					// соединение с клиентом
 					do
 					{
 						BOOL fConnected = ConnectNamedPipe(pipe, NULL) ?
@@ -209,6 +220,7 @@ void StartUiProcessInSession(DWORD wtsSession)
 						}
 					} while (true);
 
+					// обмен с клиентом
 					ImpersonateNamedPipeClient(pipe);
 					RevertToSelf();
 					for (uint8_t* buff : avBase) {
@@ -234,6 +246,7 @@ void StartUiProcessInSession(DWORD wtsSession)
 	clientThread.detach();
 }
 
+// обработчик событий сервера
 DWORD WINAPI ControlHandler(DWORD dwControl, DWORD dwEvenType, LPVOID lpEventData, LPVOID lpContext)
 {
 	DWORD result = ERROR_CALL_NOT_IMPLEMENTED;
@@ -248,7 +261,7 @@ DWORD WINAPI ControlHandler(DWORD dwControl, DWORD dwEvenType, LPVOID lpEventDat
 		result = NO_ERROR;
 		break;
 	case SERVICE_CONTROL_SESSIONCHANGE:
-
+		// запуск ui при вхождении нового пользователя
 		if (dwEvenType == WTS_SESSION_LOGON)
 		{
 			WTSSESSION_NOTIFICATION* sessionNotification = static_cast<WTSSESSION_NOTIFICATION*>(lpEventData);
@@ -267,20 +280,21 @@ DWORD WINAPI ControlHandler(DWORD dwControl, DWORD dwEvenType, LPVOID lpEventDat
 
 void WINAPI ServiceMain(DWORD argc, wchar_t** argv)
 {
+	// отслеживание событий
 	serviceStatusHandle = RegisterServiceCtrlHandlerExW(serviceName, (LPHANDLER_FUNCTION_EX)ControlHandler, argv[0]);
 	if (serviceStatusHandle == (SERVICE_STATUS_HANDLE)0) {
 		return;
 	}
-
+	// установка статуса
 	serviceStatus.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
 	serviceStatus.dwControlsAccepted = SERVICE_ACCEPT_SESSIONCHANGE | SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN;
 
 	serviceStatus.dwCurrentState = SERVICE_RUNNING;
 	SetServiceStatus(serviceStatusHandle, &serviceStatus);
-	//SECURITY_ATTRIBUTES jsa = GetSecurityAttributes(L"O:SYG:SYD:");
+	// загрузка AV баз
 	avBase = LoadSignatureFromFile(L"C:\\Users\\egoro\\Downloads\\binary-output.bin");
 	
-
+	//запуск ui во всех активных сессиях
 	PWTS_SESSION_INFOW wtsSessions;
 	DWORD sessionsCount;
 	if (WTSEnumerateSessionsW(WTS_CURRENT_SERVER_HANDLE, 0, 1, &wtsSessions, &sessionsCount))
